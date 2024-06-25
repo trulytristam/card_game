@@ -4,6 +4,7 @@ import "core:fmt"
 import "cards"
 import "cam"
 import "core:time"
+import "core:math/rand"
 import rl "vendor:raylib"
 import gl "vendor:OpenGL"
 
@@ -12,21 +13,21 @@ import "vendor:glfw"
 
 v2 :: [2]f32
 
-
 CAM := cam.cam2D_new_default()
 SELECTED_CARD :^cards.Card =  nil
 SELECTION_OFFSET : v2
 SELECTION_TIME : time.Time
-SELECTION_CLICK_TIME :f64 = 0.3
+SELECTION_CLICK_TIME :f64 = 0.14
 
 CARDS : [dynamic]cards.Card
 CONTAINERS : [dynamic]cards.Container
 
 main :: proc(){
-	rl.InitWindow(800,800,"cardgame")
-	rl.SetConfigFlags({rl.ConfigFlag.MSAA_4X_HINT})
+	//rl.SetConfigFlags({rl.ConfigFlag.FULLSCREEN_MODE})
+	rl.InitWindow(1920,1080,"cardgame")
 	glfw.Init()
 
+	reserve(&CARDS,500)
 	add_containers()
 	last_time := time.now()
 	dt :f32= 0
@@ -48,11 +49,11 @@ main :: proc(){
 		rl.BeginDrawing()
 		rl.BeginMode2D(CAM.cam)
 
-
 		cards.card_update_many(&CARDS,mouse,dt)
 		cards.container_update_many(&CONTAINERS,&CARDS,mouse,dt)
 		cards.container_draw_many(&CONTAINERS)
 
+		cards.card_draw_many(&CARDS)
 		if SELECTED_CARD != nil && time.duration_seconds(time.since(SELECTION_TIME)) > SELECTION_CLICK_TIME{
 			cards.card_draw(SELECTED_CARD)
 		}
@@ -86,29 +87,39 @@ move_selected_card :: proc(point: v2){
 }
 
 add_containers :: proc(){
-	append(&CARDS, cards.card_new_default(.ace))
-	append(&CARDS, cards.card_new_default(.ace))
-	append(&CARDS, cards.card_new_default(.ace))
-	append(&CARDS, cards.card_new_default(.ace))
-	append(&CARDS, cards.card_new_default(.ace))
-	append(&CARDS, cards.card_new_default(.ace))
-	append(&CARDS, cards.card_new_default(.ace))
+	for i in 0..<3{
+	}
+	//append(&CARDS, cards.card_new_default(.ace))
+	//append(&CARDS, cards.card_new_default(.ace))
 
 	append(&CONTAINERS, cards.container_new_default(
-			cards.spacial_info_new({400,200}, {700,300}, 1, 0)
+			cards.spacial_info_new({f32(rl.GetScreenWidth())/2- 200,200}, {1200,300}, 1, 0)
 	))
+	CONTAINERS[0].container_type = cards.containertype_grid_new({0.10,0.5},5,2,170,200)
+
+
+	append(&CONTAINERS, cards.container_new_default(
+			cards.spacial_info_new({f32(rl.GetScreenWidth())/2,537}, {1200,300}, 1, 0)
+	))
+	CONTAINERS[1].container_type = cards.containertype_grid_new({0.10,0.5},7,2,170,200)
 	 
 	append(&CONTAINERS, cards.container_new_default(
-			cards.spacial_info_new({400,600}, {700,300}, 1, 0)
+			cards.spacial_info_new({f32(rl.GetScreenWidth())/2,850}, {700,250}, 1, 0)
 	))
+	CONTAINERS[2].container_type = cards.containertype_fan_new(800,{0.5,0.44},40,40)
+
+	append(&CONTAINERS, cards.container_new_default(
+			cards.spacial_info_new({f32(rl.GetScreenWidth())-400,850}, {200,300}, 1, 0)
+	))
+	CONTAINERS[3].container_type = cards.containertype_fan_new(800,{0.5,0.5},1)
 	 
-	append(&CONTAINERS[0].cards, &CARDS[0])
-	append(&CONTAINERS[0].cards, &CARDS[1])
-	append(&CONTAINERS[0].cards, &CARDS[2])
-	append(&CONTAINERS[0].cards, &CARDS[3])
-	append(&CONTAINERS[0].cards, &CARDS[4])
-	append(&CONTAINERS[0].cards, &CARDS[5])
-	append(&CONTAINERS[0].cards, &CARDS[6])
+	//append(&CONTAINERS[0].cards, &CARDS[0])
+	//append(&CONTAINERS[0].cards, &CARDS[1])
+	// append(&CONTAINERS[0].cards, &CARDS[2])
+	// append(&CONTAINERS[0].cards, &CARDS[3])
+	// append(&CONTAINERS[0].cards, &CARDS[4])
+	//append(&CONTAINERS[0].cards, &CARDS[5])
+	//append(&CONTAINERS[0].cards, &CARDS[6])
 }
 
 handle_input :: proc(mouse: v2){
@@ -117,5 +128,12 @@ handle_input :: proc(mouse: v2){
 	}
 	if rl.IsMouseButtonReleased(rl.MouseButton.LEFT) {
 		unselect_card()
+	}
+
+	if rl.IsKeyPressed(rl.KeyboardKey.SPACE){
+		rand_val := rand.choice_enum(cards.CardValue) 
+		rand_suit := rand.choice_enum(cards.CardSuit) 
+		append(&CARDS, cards.card_new_default(mouse, rand_val,rand_suit))
+		fmt.println("card added")
 	}
 }
