@@ -6,7 +6,10 @@ import "core:sort"
 import "core:slice"
 import "core:fmt"
 import "core:math/rand"
+import "core:math"
 import la "core:math/linalg"
+import "../sounds"
+
 v3 :: [3]f32
 v2 :: [2]f32
 
@@ -14,6 +17,7 @@ v2 :: [2]f32
 
 CARD_WIDTH :: 500
 CARD_HEIGHT :: 700
+SHADOW_OFFSET :v2 = {10,10}
 
 CARD_BASE_TEXTURES_INITIALIZED := false
 CARD_BASE_TEXTURES : map[CardValue]CardImage
@@ -62,14 +66,14 @@ spacial_info_point_inside :: proc(using self: SpacialInfo, in_point: v2)-> bool 
 
 
 
-spacial_info_draw :: proc(using si: SpacialInfo,col := rl.RED){
+spacial_info_draw :: proc(using si: SpacialInfo,col := rl.RED,rounded : f32 = 0.2){
 	offset := spacial_info_get_offset_to_center(si)
 	posa := pos - offset
 	//rl.DrawRectangleLines(i32(posa.x),i32(posa.y),i32(dim.x*scale), i32(dim.y*scale), col)
 
 	cola := col
-	cola[3] = 50
-	rl.DrawRectangleRounded({posa.x,posa.y,dim.x*scale,dim.y*scale},0.2,8, cola)
+	cola[3] = 150
+	rl.DrawRectangleRounded({posa.x,posa.y,dim.x*scale,dim.y*scale},rounded,8, cola)
 	// rl.DrawRectanglePro(
 	// 	rl.Rectangle{
 	// 	posa.x,posa.y,dim.x*scale, dim.y*scale
@@ -190,24 +194,31 @@ card_update_lerped_values :: proc(using card: ^Card, dt: f32){
 	pos += (pos_target- pos) * dt * 9 
 	rotation += (rotation_target- rotation) * dt * 9 
 }
-card_update :: proc(using card: ^Card, mouse: v2, dt: f32){
-	//fmt.printfln("card {} info: {}",card.id, card.spacial_info)
-	card_update_lerped_bools(card,dt)
-	card_update_lerped_values(card,dt)
-
+card_update_hover :: proc(using card: ^Card,mouse:v2){
 	si_card := card_get_spacial_info(card)
 	rot_off := card_get_rotation_offset(card) 
 	si_card.pos_target -= rot_off
 	si_card.pos -= rot_off
 	on_card :=spacial_info_point_inside(si_card,mouse)
-
+	if !on_card || CARD_HOVER_FOUND {
+		hover_info.b_hovered.state = false 
+	}
 	if on_card && !CARD_HOVER_FOUND {
+		if hover_info.b_hovered.state != true {
+			sounds.play_sound(.card_hover)
+		}
+
 		hover_info.b_hovered.state = true 
 		CARD_HOVER_FOUND = true
 	}
-	if !on_card {
-		hover_info.b_hovered.state = false 
-	}
+
+}
+card_update :: proc(using card: ^Card, mouse: v2, dt: f32){
+	//fmt.printfln("card {} info: {}",card.id, card.spacial_info)
+	card_update_lerped_bools(card,dt)
+	card_update_lerped_values(card,dt)
+
+	card_update_hover(card,mouse)
 	
 }
 
@@ -216,9 +227,8 @@ spacial_info_get_offset_to_center :: proc(using card: SpacialInfo)->v2{
 	return adim
 }
 
-card_update_many :: proc(cards: ^[dynamic]Card,mouse: v2, dt:f32){
+card_update_many :: proc(cards: ^[dynamic]Card,mouse: v2, dt:f32,time_start:f32){
 	card_reset_globals()
-
 	for i := len(cards)-1 ; i>= 0 ; i-=1 {
 		c := &cards[i]
 		if c.container== nil {
@@ -227,18 +237,35 @@ card_update_many :: proc(cards: ^[dynamic]Card,mouse: v2, dt:f32){
 	}
 }
 
-card_draw :: proc(using card: ^Card){
+lissajous_offset :: proc(t: f32, id: u32)->v2 {
+	rng := rand.Rand{state=u64(id)}
+	whole, frac := math.modf(1.1*t)
+	s:= math.floor(1.1*t) + f32(la.smoothstep(0.9,1,f64(frac)))
+
+	ri := rand.int_max(1000, &rng)
+	ra := f32(ri)/100
+	ri = rand.int_max(1000, &rng)
+	rb := f32(ri)/100
+	ri = rand.int_max(1000, &rng)
+	rc := f32(ri)/1000
+
+	a := math.sin((1.7+rc)*t+ra)
+	b := math.sin((2.3-rc)*t-rb)
+
+	return {a,b}
+}
+
+card_draw :: proc(using card: ^Card, start_time: f32){
 	adjust_spacial_info := card_get_spacial_info(card)
 	using adjust_spacial_info
 
 	hover_v := card.hover_info.b_hovered.current
 	sel_v := card.is_selected.current
-	rotation += -0.0 * hover_v
-	scale += 0.02 * hover_v
+	rotation += -0.04 * hover_v
+	scale += 0.08 * hover_v
 	offset := spacial_info_get_offset_to_center(adjust_spacial_info)
 	rotation_offset := card_get_rotation_offset(card)
 
-	
 	//rl.DrawTextureEx(CARD_BASE_TEXTURES[card.value].tex, {pos.x,pos.y+height_anim}-offset-rotation_offset, rot_amount , scale_amount , rl.WHITE)
 	col := interp_color({1,0,0},{0,1,0}, hover_v)
 
@@ -257,12 +284,22 @@ card_draw :: proc(using card: ^Card){
 	//fmt.printfln("vx: {} , sy: {}", vx,sy)
 	source_rect := rl.Rectangle{f32(vx*500),f32(sy*700),500,700}
 	dima := card.spacial_info.dim* card.spacial_info.scale
-	posa := pos- offset - rotation_offset
+	lissajous :=lissajous_offset(start_time,u32(card.id))*2
+	posa := pos+ lissajous - offset - rotation_offset
 	dest_rect := rl.Rectangle{posa.x,posa.y,dima.x,dima.y} 
-	rl.DrawTexturePro(CARD_SET_1, source_rect, dest_rect, {0,0}, la.to_degrees(rotation), rl.WHITE)
+	dest_rect_off := rl.Rectangle{posa.x+2+SHADOW_OFFSET.x/2,posa.y+SHADOW_OFFSET.y/2,dima.x,dima.y} 
+
+	black := rl.Color{0,0,0,180}
+
+	//DRAWSHADOW
+
+	
+	rl.DrawTexturePro(CARD_SET_1, source_rect, dest_rect_off, {0,0}, la.to_degrees(rotation+lissajous.x*0.001), black)
+	rl.DrawTexturePro(CARD_SET_1, source_rect, dest_rect, {0,0}, la.to_degrees(rotation+lissajous.x*0.001), rl.WHITE)
+
 
 	if card.container != nil{
-		rl.DrawCircle(i32(pos.x),i32(pos.y),5,card.container_color)
+		//rl.DrawCircle(i32(pos.x),i32(pos.y),5,card.container_color)
 	}
 }
 
@@ -279,10 +316,10 @@ card_get_rotation_offset:: proc(using self: ^Card)-> v2 {
 	return rotation_offset
 }
 
-card_draw_many :: proc(cards : ^[dynamic]Card){
+card_draw_many :: proc(cards : ^[dynamic]Card,start_time:f32){
 	for &card in cards{
 		if card.container == nil {
-			card_draw(&card)
+			card_draw(&card,start_time)
 		}
 	}
 }
@@ -389,6 +426,7 @@ Container :: struct {
 	id : ContainerId, 
 	spacial_info : SpacialInfo,
 	cards : [dynamic]^Card,
+	card_limit : u32,
 	container_type: ContainerType,
 	hover_info : HoverInfo,
 	color : rl.Color, 
@@ -490,7 +528,8 @@ container_update :: proc(c : ^Container,cards: ^[dynamic]Card, mouse:v2,dt:f32) 
 	container_solve_card_colors(c)
 }
 container_update_cards :: proc(self:^Container,mouse:v2, dt:f32){
-	for &c in self.cards {
+	for i:= len(self.cards)-1; i>=0; i-=1 {
+		c := self.cards[i]
 		card_update(c,mouse,dt)
 	}
 }
@@ -505,7 +544,7 @@ container_remove_out_of_bound_cards :: proc(self : ^Container){
 			self.cards[i].container = nil
 			self.cards[i].spacial_info.rotation_target = 0
 			unordered_remove(&self.cards,i)
-			fmt.printfln("cid {} card count after remove {}",self.id, len(self.cards))
+			// fmt.printfln("cid {} card count after remove {}",self.id, len(self.cards))
 		}
 	}
 }
@@ -523,12 +562,12 @@ container_contains_card :: proc(self: ^Container, card: ^Card)->bool{
 container_add_in_bound_cards :: proc(self: ^Container, cards: ^[dynamic]Card){
 	for &c in cards {
 		is_inside := spacial_info_point_inside(self.spacial_info ,c.spacial_info.pos_target)
-		if is_inside{
+		if is_inside && u32(len(self.cards)) + 1 <= self.card_limit{
 			c.container = self
 			is_already_there := container_contains_card(self, &c)
 			if !is_already_there {
 				append(&self.cards, &c)
-				fmt.printfln("cid {} card count after add {}",self.id, len(self.cards))
+				// fmt.printfln("cid {} card count after add {}",self.id, len(self.cards))
 			}
 
 		}
@@ -540,37 +579,141 @@ container_add_in_bound_cards_many :: proc(self: ^[dynamic]Container, cards: ^[dy
 	} 
 }
 
-container_update_many :: proc(containers : ^[dynamic]Container,cards: ^[dynamic]Card,mouse:v2, dt:f32) {
+container_update_many :: proc(containers : ^[dynamic]Container,cards: ^[dynamic]Card,mouse:v2, dt:f32,time_start: f32) {
 	for &c in containers {
 		container_update(&c,cards,mouse,dt)
 	}
 }
 
-container_new_default :: proc(spacial_info: SpacialInfo)-> Container {
+container_new_default :: proc(spacial_info: SpacialInfo, card_limit:u32 = 12)-> Container {
 	r,g,b := f32(rl.GetRandomValue(20,255))/255,f32(rl.GetRandomValue(20,255))/255,f32(rl.GetRandomValue(20,255))/255
 	return Container {
 		id = container_get_new_id(),
 		spacial_info = spacial_info,
 		container_type = containertype_fan_new_default(),
-		color = rl.ColorFromNormalized({r,g,b,1}) 
+		color = rl.ColorFromNormalized({r,g,b,1}) ,
+		card_limit = card_limit
 	}
 }
 
-container_draw :: proc(self : Container){
+container_draw :: proc(self : Container,start_time:f32){
 	col := interp_color({1,0,0},{0,1,0}, self.hover_info.b_hovered.current)
+
+	spacial_info_shadow := self.spacial_info
+	spacial_info_shadow.pos += SHADOW_OFFSET
+
+
+	shadow_col := rl.Color{0,0,0,150}
+	spacial_info_draw(spacial_info_shadow, shadow_col)
 	spacial_info_draw(self.spacial_info, self.color)
 
 
 	//fmt.println("care n: ", len(self.cards))
-	for &card in self.cards {
+	for i:= 0; i<len(self.cards); i+=1 {
 		//fmt.println("card info: ", card.spacial_info )
-		card_draw(card)
+		card := self.cards[i]
+		card_draw(card,start_time)
 	}
 }
  
-container_draw_many :: proc(containers: ^[dynamic]Container){
+container_draw_many :: proc(containers: ^[dynamic]Container,start_time:f32){
 	for &container in containers {
-		container_draw(container)
+		container_draw(container,start_time)
+	}
+}
+
+//////////
+
+UiType_Button :: struct{
+	hover: LerpedBool
+}
+UiType_Display :: struct{
+	value : string,
+}
+
+UiType :: union {
+	UiType_Button,
+	UiType_Display,
+}
+
+//pos loc is using -1,-1 as top left and 1,1 as bottom right
+UiTextInfo :: struct{
+	text: string,
+	font_size: i32,
+	pos_loc: v2, 
+}
+ui_text_info_new :: proc(
+	text: string,
+	font_size: i32,
+	pos_loc: v2, 
+) ->UiTextInfo {
+	return {
+		text,
+		font_size,
+		pos_loc,
+	}
+}
+
+Ui :: struct {
+	spacial_info : SpacialInfo,
+	hover : HoverInfo,
+	text: UiTextInfo, 
+	color_primary: rl.Color,
+	color_secondary: rl.Color,
+	text_color: rl.Color,
+}
+
+ui_new :: proc(
+	spacial_info : SpacialInfo,
+	text: UiTextInfo, 
+	hover: HoverInfo,
+	color_primary: rl.Color,
+	color_secondary: rl.Color,
+	text_color: rl.Color,
+)->Ui{
+	return Ui {
+		spacial_info,
+		hover,
+		text,
+		color_primary,
+		color_secondary,
+		text_color,
+	}
+}
+
+ui_draw :: proc(self: ^Ui, dt, start_time : f32){
+	si := self.spacial_info
+	si.pos.x += math.sin(start_time*15) * self.hover.b_hovered.current
+	si.scale += 0.1 * self.hover.b_hovered.current
+	si_inset := si
+	spacial_info_offset:= si
+	spacial_info_offset.pos += SHADOW_OFFSET/2
+	spacial_info_draw(spacial_info_offset, rl.BLACK, 0.7)
+	spacial_info_draw(si, self.color_primary, 0.7)
+
+	si_inset.scale *= 0.8
+	si_inset.dim.x *= 1.2
+	spacial_info_draw(si_inset, rl.DARKBLUE, 0.7)
+
+	offset := spacial_info_get_offset_to_center(si)
+	draw_pos := si.pos + (offset * self.text.pos_loc)
+	rl.DrawText(s.clone_to_cstring(self.text.text), i32(draw_pos.x+3),i32(draw_pos.y+3), self.text.font_size, rl.BLACK)
+	rl.DrawText(s.clone_to_cstring(self.text.text), i32(draw_pos.x),i32(draw_pos.y), self.text.font_size, rl.WHITE)
+}
+
+ui_draw_many :: proc(self: ^[dynamic]Ui, dt,start_time: f32){
+	for &ui in self {
+		ui_draw(&ui, dt, start_time)
+	}
+}
+
+ui_update :: proc(self: ^Ui, dt: f32,mouse:v2){
+	hover_info_update(&self.hover,self.spacial_info,mouse,dt,20)
+}
+
+ui_update_many :: proc(self: ^[dynamic]Ui, dt: f32, mouse: v2){
+	for &ui in self {
+		ui_update(&ui, dt,mouse)
 	}
 }
 
